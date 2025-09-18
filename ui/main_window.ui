@@ -58,8 +58,6 @@
       </item>
       <item row="1" column="5">
        <widget class="QComboBox" name="comboFps">
-        <item><property name="text"><string>6</string></property></item>
-        <item><property name="text"><string>12</string></property></item>
         <item><property name="text"><string>15</string></property></item>
         <item><property name="text"><string>30</string></property></item>
        </widget>
