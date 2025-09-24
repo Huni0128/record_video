@@ -7,6 +7,9 @@ Intel RealSense 기록 쓰레드.
   - depth_raw_frames.npy : (N, H, W) uint16, 깊이 프레임만 저장
   - device_stream_info.json     : 장치/센서/내·외부 파라미터 + depth_scale
   - depth_colorized.mp4 / color.mp4 (컬러 센서가 있을 때)
+  - depth_color_frames/frame_XXXXXX.png : 색상화된 depth 이미지 (선택)
+  - color_frames/frame_XXXXXX.png : 컬러 이미지 (선택)
+  - depth_raw_frames/frame_XXXXXX.npy : 프레임별 depth raw (선택)
 
 Docstring 스타일: Google Style
 """
@@ -62,6 +65,25 @@ class RecordThread(QtCore.QThread):
         self.depth_scale: Optional[float] = None
         self.depth_raw_frames: List[np.ndarray] = []
 
+        # 프레임 저장 관련
+        self._frame_idx: int = 0
+        self._frame_stride: int = max(1, int(self.cfg.frame_stride))
+        self._depth_color_frame_dir: Optional[str] = None
+        self._color_frame_dir: Optional[str] = None
+        self._depth_raw_frame_dir: Optional[str] = None
+        if self.cfg.save_frames:
+            self._depth_color_frame_dir = os.path.join(
+                self.cfg.out_dir, "depth_color_frames"
+            )
+            os.makedirs(self._depth_color_frame_dir, exist_ok=True)
+            self._color_frame_dir = os.path.join(self.cfg.out_dir, "color_frames")
+            os.makedirs(self._color_frame_dir, exist_ok=True)
+            self._depth_raw_frame_dir = os.path.join(
+                self.cfg.out_dir, "depth_raw_frames"
+            )
+            os.makedirs(self._depth_raw_frame_dir, exist_ok=True)
+        self._frame_save_error_reported: bool = False
+
         # 내부 상태
         self._color_enabled: bool = False
         self._color_size: Optional[Tuple[int, int]] = None  # (w, h)
@@ -102,6 +124,9 @@ class RecordThread(QtCore.QThread):
     def run(self) -> None:
         try:
             rs = _import_rs()
+
+            self._frame_idx = 0
+            self._frame_save_error_reported = False
 
             self.sig_status.emit("Starting pipeline...")
             self.pipeline = rs.pipeline()
@@ -247,6 +272,34 @@ class RecordThread(QtCore.QThread):
                         (self.cfg.height, self.cfg.width, 3), dtype=np.uint8
                     )
 
+                frame_idx = self._frame_idx
+
+                if self.cfg.save_frames and (frame_idx % self._frame_stride == 0):
+                    frame_base = f"frame_{frame_idx:06d}"
+                    try:
+                        if self._depth_color_frame_dir is not None:
+                            depth_path = os.path.join(
+                                self._depth_color_frame_dir, f"{frame_base}.png"
+                            )
+                            cv2.imwrite(depth_path, depth_color)
+                        if (
+                            self._color_frame_dir is not None
+                            and color_frame is not None
+                        ):
+                            color_path = os.path.join(
+                                self._color_frame_dir, f"{frame_base}.png"
+                            )
+                            cv2.imwrite(color_path, color_img)
+                        if self._depth_raw_frame_dir is not None:
+                            raw_path = os.path.join(
+                                self._depth_raw_frame_dir, f"{frame_base}.npy"
+                            )
+                            np.save(raw_path, depth_raw)
+                    except Exception as exc:  # noqa: BLE001
+                        if not self._frame_save_error_reported:
+                            self._frame_save_error_reported = True
+                            self.sig_status.emit(f"Frame save error: {exc}")
+
                 # 비디오 저장
                 if self.cfg.save_videos:
                     if self.depth_video is not None:
@@ -260,6 +313,8 @@ class RecordThread(QtCore.QThread):
 
                 # 미리보기 송출
                 self.sig_preview.emit(depth_color, color_img)
+
+                self._frame_idx += 1
 
             self.sig_status.emit("Stopping...")
 

@@ -99,8 +99,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.comboFps.setCurrentText("15")
         if hasattr(self, "chkSaveDepthRaw"):
             self.chkSaveDepthRaw.setText("Save Depth (.npy)")
-
+        if hasattr(self, "chkSaveFrames"):
+            self.chkSaveFrames.setText("Save Frames (images + depth .npy)")
+            self.chkSaveFrames.setChecked(True)
+        if hasattr(self, "spinFrameStep"):
+            self.spinFrameStep.setMinimum(1)
+            self.spinFrameStep.setMaximum(120)
+            self.spinFrameStep.setValue(1)
         self.rec_thread: Optional[RecordThread] = None
+        self._is_recording: bool = False
+
+        if hasattr(self, "chkSaveFrames") and hasattr(self, "spinFrameStep"):
+            self.spinFrameStep.setEnabled(self.chkSaveFrames.isChecked())
+            self.chkSaveFrames.toggled.connect(self._on_save_frames_toggled)
 
         # ---- Viewer (NPY 임베드) ----
         self._viewer: Optional[NpyViewerWidget] = None
@@ -120,6 +131,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_running(self, running: bool) -> None:
         """녹화 중에는 Stop만 활성화, 나머지는 비활성화."""
+        self._is_recording = running
         widget_names = (
             "btnStart",
             "btnStop",
@@ -129,6 +141,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "comboFps",
             "chkSaveVideos",
             "chkSaveDepthRaw",
+            "chkSaveFrames",
+            "spinFrameStep",
         )
         for name in widget_names:
             widget = getattr(self, name, None)
@@ -138,8 +152,19 @@ class MainWindow(QtWidgets.QMainWindow):
                 widget.setEnabled(not running)
             elif name == "btnStop":
                 widget.setEnabled(running)
+            elif name == "spinFrameStep":
+                chk = getattr(self, "chkSaveFrames", None)
+                enabled = not running and (chk.isChecked() if chk else True)
+                widget.setEnabled(enabled)
             else:
                 widget.setEnabled(not running)
+
+    @QtCore.pyqtSlot(bool)
+    def _on_save_frames_toggled(self, checked: bool) -> None:
+        """Save Frames 옵션 토글 시 프레임 간격 스핀박스 활성화 상태를 갱신."""
+
+        if hasattr(self, "spinFrameStep"):
+            self.spinFrameStep.setEnabled(checked and not self._is_recording)
 
     def on_browse(self) -> None:
         """출력 베이스 디렉터리 선택."""
@@ -167,6 +192,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 if hasattr(self, "chkSaveDepthRaw")
                 else True
             )
+            save_frames = (
+                self.chkSaveFrames.isChecked()
+                if hasattr(self, "chkSaveFrames")
+                else False
+            )
+            frame_stride = (
+                max(1, int(self.spinFrameStep.value()))
+                if hasattr(self, "spinFrameStep")
+                else 1
+            )
 
             cfg = RecordConfig(
                 out_dir=out_dir,
@@ -175,6 +210,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 fps=fps,
                 save_videos=save_videos,
                 save_depth_npy=save_depth_npy,
+                save_frames=save_frames,
+                frame_stride=frame_stride,
             )
 
             self.rec_thread = RecordThread(cfg)
