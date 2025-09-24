@@ -21,6 +21,7 @@ from ..analysis.crop import (
 )
 from ..core import DEFAULT_BASE_DIR, RecordConfig, ensure_out_dir
 from ..recording import RecordThread
+from .crop_verify import CropVerifyWidget
 from .image import qimage_from_cv
 from .threads import FuncThread
 from .viewer import NpyViewerWidget
@@ -83,6 +84,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bag_info: Optional[Dict[str, Any]] = None
         self._crop_context: Optional[str] = None
         self._crop_running: bool = False
+        self._crop_verify_widget: Optional[CropVerifyWidget] = None
 
         self._build_analysis_ui()
 
@@ -506,6 +508,9 @@ class MainWindow(QtWidgets.QMainWindow):
         bag_tab = self._create_crop_bag_tab()
         self._crop_tabs.addTab(bag_tab, "From .bag")
 
+        verify_tab = self._create_crop_verify_tab()
+        self._crop_tabs.addTab(verify_tab, "Verify output")
+
         self.txtCropLog = QtWidgets.QTextEdit()
         self.txtCropLog.setReadOnly(True)
         self.txtCropLog.setPlaceholderText(
@@ -528,6 +533,12 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(gb_out)
 
         return widget
+
+    def _create_crop_verify_tab(self) -> QtWidgets.QWidget:
+        """Create the verification tab that checks cropped outputs."""
+
+        self._crop_verify_widget = CropVerifyWidget(self)
+        return self._crop_verify_widget
 
     def _create_crop_saved_tab(self) -> QtWidgets.QWidget:
         """저장된 산출물에서 크롭하는 탭 UI 구성."""
@@ -1014,6 +1025,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage("Crop finished", 5000)
 
         self._crop_context = None
+        verify_widget = getattr(self, "_crop_verify_widget", None)
+        if isinstance(verify_widget, CropVerifyWidget) and out_dir:
+            try:
+                verify_widget.load_directory(str(out_dir))
+            except Exception:
+                pass
         if self._crop_thread is not None:
             self._crop_thread.deleteLater()
         self._crop_thread = None

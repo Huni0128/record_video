@@ -45,6 +45,11 @@ Cropped artifacts are written to timestamped folders under
 `.npy` files and any cropped image sequences. A `crop_info.json` file contains
 the summary of each operation.
 
+Use the **Verify output** sub-tab inside **Crop Frames** to confirm the number
+of saved `frame_*.npy` depth slices matches the exported color or depth-color
+images. The preview slider lets you inspect pairs of frames to visually confirm
+alignment.
+
 ## Quick matplotlib preview
 
 ```bash

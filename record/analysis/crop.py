@@ -17,11 +17,82 @@ __all__ = [
     "probe_bag_info",
     "crop_saved_outputs",
     "crop_bag_frames",
+    "summarize_crop_output",
 ]
 
 
 DEFAULT_CROP_BASE = "save/crop_out"
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+
+
+# ----------------------------- Util helpers ------------------------------ #
+
+
+def _frame_index_from_name(name: str) -> Optional[int]:
+    """Extract the integer index from file names such as ``frame_000123``."""
+
+    stem, _ = os.path.splitext(name)
+    if not stem.startswith("frame_"):
+        return None
+    suffix = stem[6:]
+    if not suffix:
+        return None
+    try:
+        return int(suffix)
+    except ValueError:
+        return None
+
+
+def _format_indices(indices: Sequence[int], limit: int = 12) -> str:
+    """Return a short preview string for a list of indices."""
+
+    if not indices:
+        return ""
+    if len(indices) <= limit:
+        return ", ".join(map(str, indices))
+    head = ", ".join(map(str, indices[:limit]))
+    return f"{head} … (+{len(indices) - limit})"
+
+
+def _collect_frame_files(
+    directory: str, allowed_exts: Sequence[str]
+) -> Tuple[Dict[int, str], List[int], List[str]]:
+    """Collect ``frame_XXXX`` files inside *directory*.
+
+    Args:
+        directory: Directory that may contain per-frame files.
+        allowed_exts: Acceptable lowercase extensions including the dot.
+
+    Returns:
+        ``(files, indices, ignored)`` tuple where ``files`` maps frame indices
+        to absolute paths, ``indices`` is the sorted list of indices and
+        ``ignored`` contains names skipped because they do not follow the
+        ``frame_`` pattern.
+    """
+
+    files: Dict[int, str] = {}
+    indices: List[int] = []
+    ignored: List[str] = []
+
+    if not os.path.isdir(directory):
+        return files, indices, ignored
+
+    for name in sorted(os.listdir(directory)):
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path):
+            continue
+        _stem, ext = os.path.splitext(name)
+        if allowed_exts and ext.lower() not in allowed_exts:
+            continue
+        idx = _frame_index_from_name(name)
+        if idx is None:
+            ignored.append(name)
+            continue
+        files[idx] = path
+        indices.append(idx)
+
+    indices.sort()
+    return files, indices, ignored
 
 
 # ------------------------------- Probing --------------------------------- #
@@ -143,6 +214,230 @@ def _write_json(path: str, data: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def summarize_crop_output(out_dir: str) -> Dict[str, Any]:
+    """Inspect a cropped output directory and highlight mismatches.
+
+    The function checks ``depth_raw_frames`` ``.npy`` files and optionally the
+    ``color_frames`` / ``depth_color_frames`` image folders. It also inspects the
+    optional aggregated ``depth_raw_frames.npy`` file and ``crop_info.json``
+    metadata when available.
+
+    Args:
+        out_dir: Crop output directory produced by :func:`crop_saved_outputs` or
+            :func:`crop_bag_frames`.
+
+    Returns:
+        Dictionary summarizing the findings. Keys include ``depth``/``color``/
+        ``depth_color`` sections describing counts, missing indices and whether
+        the files match. ``consistent`` will be ``True`` only when every
+        required asset is present and aligned.
+    """
+
+    out_dir = os.path.abspath(out_dir)
+    if not os.path.isdir(out_dir):
+        raise NotADirectoryError(f"Crop output directory not found: {out_dir}")
+
+    info_path = os.path.join(out_dir, "crop_info.json")
+    info_data: Optional[Dict[str, Any]] = None
+    if os.path.isfile(info_path):
+        try:
+            with open(info_path, "r", encoding="utf-8") as f:
+                info_data = json.load(f)
+        except Exception as exc:  # noqa: BLE001
+            info_data = {"error": str(exc)}
+
+    expected_frames: Optional[int] = None
+    if isinstance(info_data, dict):
+        frames_val = info_data.get("frames")
+        if isinstance(frames_val, int) and frames_val >= 0:
+            expected_frames = frames_val
+
+    summary: Dict[str, Any] = {
+        "out_dir": out_dir,
+        "info_path": info_path if os.path.isfile(info_path) else None,
+        "info": info_data,
+        "expected_frames": expected_frames,
+        "messages": [],
+    }
+
+    depth_dir = os.path.join(out_dir, "depth_raw_frames")
+    depth_files, depth_indices, depth_ignored = _collect_frame_files(
+        depth_dir, (".npy",)
+    )
+    depth_expected = (
+        list(range(expected_frames))
+        if expected_frames is not None
+        else list(range(len(depth_indices)))
+    )
+    depth_missing = sorted(set(depth_expected) - set(depth_indices))
+    depth_unexpected = sorted(set(depth_indices) - set(depth_expected))
+
+    depth_summary = {
+        "dir": depth_dir if os.path.isdir(depth_dir) else None,
+        "count": len(depth_indices),
+        "indices": depth_indices,
+        "files": depth_files,
+        "ignored": depth_ignored,
+        "missing": depth_missing,
+        "unexpected": depth_unexpected,
+        "match": False,
+    }
+    summary["depth"] = depth_summary
+
+    if not os.path.isdir(depth_dir):
+        summary["messages"].append("depth_raw_frames 디렉터리를 찾을 수 없습니다.")
+    elif not depth_indices:
+        summary["messages"].append("depth_raw_frames 폴더에 frame_*.npy 파일이 없습니다.")
+    depth_summary["match"] = (
+        bool(depth_indices)
+        and not depth_missing
+        and not depth_unexpected
+        and (
+            expected_frames is None
+            or len(depth_indices) == expected_frames
+        )
+    )
+
+    color_dir = os.path.join(out_dir, "color_frames")
+    color_files, color_indices, color_ignored = _collect_frame_files(
+        color_dir, _IMAGE_EXTS
+    )
+    color_missing = sorted(set(depth_indices) - set(color_indices)) if depth_indices else []
+    color_unexpected = sorted(set(color_indices) - set(depth_indices)) if depth_indices else []
+    color_summary = {
+        "dir": color_dir if os.path.isdir(color_dir) else None,
+        "count": len(color_indices),
+        "indices": color_indices,
+        "files": color_files,
+        "ignored": color_ignored,
+        "missing": color_missing,
+        "unexpected": color_unexpected,
+        "match": None,
+    }
+    summary["color"] = color_summary
+    if os.path.isdir(color_dir):
+        color_summary["match"] = (
+            bool(color_indices)
+            and not color_missing
+            and not color_unexpected
+            and (len(color_indices) == len(depth_indices) if depth_indices else True)
+        )
+        if not color_summary["match"] and depth_indices:
+            msg = "color_frames 폴더의 프레임 수가 depth와 일치하지 않습니다."
+            if color_missing:
+                msg += f" missing: { _format_indices(color_missing) }"
+            if color_unexpected:
+                msg += f" unexpected: { _format_indices(color_unexpected) }"
+            summary["messages"].append(msg)
+    elif depth_indices:
+        summary["messages"].append(
+            "color_frames 디렉터리가 없어 이미지 매칭을 확인할 수 없습니다."
+        )
+
+    depth_color_dir = os.path.join(out_dir, "depth_color_frames")
+    depth_color_files, depth_color_indices, depth_color_ignored = _collect_frame_files(
+        depth_color_dir, _IMAGE_EXTS
+    )
+    depth_color_missing = (
+        sorted(set(depth_indices) - set(depth_color_indices)) if depth_indices else []
+    )
+    depth_color_unexpected = (
+        sorted(set(depth_color_indices) - set(depth_indices)) if depth_indices else []
+    )
+    depth_color_summary = {
+        "dir": depth_color_dir if os.path.isdir(depth_color_dir) else None,
+        "count": len(depth_color_indices),
+        "indices": depth_color_indices,
+        "files": depth_color_files,
+        "ignored": depth_color_ignored,
+        "missing": depth_color_missing,
+        "unexpected": depth_color_unexpected,
+        "match": None,
+    }
+    summary["depth_color"] = depth_color_summary
+    if os.path.isdir(depth_color_dir):
+        depth_color_summary["match"] = (
+            bool(depth_color_indices)
+            and not depth_color_missing
+            and not depth_color_unexpected
+            and (len(depth_color_indices) == len(depth_indices) if depth_indices else True)
+        )
+        if not depth_color_summary["match"] and depth_indices:
+            msg = "depth_color_frames 폴더의 프레임 수가 depth와 일치하지 않습니다."
+            if depth_color_missing:
+                msg += f" missing: { _format_indices(depth_color_missing) }"
+            if depth_color_unexpected:
+                msg += f" unexpected: { _format_indices(depth_color_unexpected) }"
+            summary["messages"].append(msg)
+
+    depth_npy_path = os.path.join(out_dir, "depth_raw_frames.npy")
+    depth_npy_summary: Dict[str, Any] = {
+        "path": depth_npy_path if os.path.isfile(depth_npy_path) else None,
+        "shape": None,
+        "frames": None,
+        "match": None,
+        "error": None,
+    }
+    summary["depth_npy"] = depth_npy_summary
+    if os.path.isfile(depth_npy_path):
+        try:
+            depth_np = np.load(depth_npy_path, mmap_mode="r")
+            depth_npy_summary["shape"] = tuple(int(x) for x in depth_np.shape)
+            if depth_np.ndim == 3:
+                depth_npy_summary["frames"] = int(depth_np.shape[0])
+                depth_npy_summary["match"] = (
+                    depth_indices
+                    and int(depth_np.shape[0]) == len(depth_indices)
+                )
+            else:
+                depth_npy_summary["match"] = False
+                summary["messages"].append(
+                    f"depth_raw_frames.npy 형상이 예상과 다릅니다: shape={depth_np.shape}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            depth_npy_summary["error"] = str(exc)
+            summary["messages"].append(f"depth_raw_frames.npy 읽기 오류: {exc}")
+        finally:
+            try:
+                del depth_np
+            except Exception:
+                pass
+
+    consistent = depth_summary["match"]
+    if depth_summary["dir"] is None:
+        consistent = False
+
+    if depth_indices:
+        if color_summary["match"] is False:
+            consistent = False
+        if color_summary["dir"] is None:
+            consistent = False
+        if depth_color_summary["match"] is False:
+            consistent = False
+    if depth_npy_summary["match"] is False:
+        consistent = False
+
+    summary["consistent"] = bool(consistent)
+
+    if depth_summary["ignored"]:
+        summary["messages"].append(
+            "다음 depth 파일은 frame_* 패턴이 아니므로 무시되었습니다: "
+            + ", ".join(depth_summary["ignored"])
+        )
+    if color_summary["ignored"]:
+        summary["messages"].append(
+            "다음 color 파일은 frame_* 패턴이 아니므로 무시되었습니다: "
+            + ", ".join(color_summary["ignored"])
+        )
+    if depth_color_summary["ignored"]:
+        summary["messages"].append(
+            "다음 depth_color 파일은 frame_* 패턴이 아니므로 무시되었습니다: "
+            + ", ".join(depth_color_summary["ignored"])
+        )
+
+    return summary
 
 
 def _resolve_frame_range(
@@ -513,3 +808,75 @@ def crop_bag_frames(
 
     _write_json(os.path.join(out_dir, "crop_info.json"), summary)
     return summary
+# ----------------------------- Util helpers ------------------------------ #
+
+
+def _frame_index_from_name(name: str) -> Optional[int]:
+    """Extract integer frame index from file name like ``frame_000123``."""
+
+    stem, _ext = os.path.splitext(name)
+    if not stem.startswith("frame_"):
+        return None
+    idx_txt = stem[6:]
+    if not idx_txt:
+        return None
+    try:
+        return int(idx_txt)
+    except ValueError:
+        return None
+
+
+def _format_indices(indices: Sequence[int], limit: int = 12) -> str:
+    """Return a human readable preview of integer indices."""
+
+    if not indices:
+        return ""
+    if len(indices) <= limit:
+        return ", ".join(map(str, indices))
+    head = ", ".join(map(str, indices[:limit]))
+    return f"{head} … (+{len(indices) - limit})"
+
+
+def _collect_frame_files(
+    directory: str,
+    allowed_exts: Sequence[str],
+) -> Tuple[Dict[int, str], List[int], List[str]]:
+    """Return mapping of ``frame_XXXX`` files in ``directory``.
+
+    Args:
+        directory: Directory to scan.
+        allowed_exts: Allowed lowercase extensions including the leading dot.
+
+    Returns:
+        Tuple of ``(files_map, indices, ignored)`` where ``files_map`` maps frame
+        indices to absolute file paths, ``indices`` is the sorted list of
+        detected indices and ``ignored`` contains file names that did not match
+        the ``frame_`` pattern.
+    """
+
+    files: Dict[int, str] = {}
+    indices: List[int] = []
+    ignored: List[str] = []
+
+    if not os.path.isdir(directory):
+        return files, indices, ignored
+
+    for name in sorted(os.listdir(directory)):
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path):
+            continue
+        _, ext = os.path.splitext(name)
+        if allowed_exts and ext.lower() not in allowed_exts:
+            continue
+        idx = _frame_index_from_name(name)
+        if idx is None:
+            ignored.append(name)
+            continue
+        indices.append(idx)
+        files[idx] = path
+
+    indices.sort()
+    return files, indices, ignored
+
+
+# ------------------------------- Probing --------------------------------- #
