@@ -70,6 +70,7 @@ class RecordThread(QtCore.QThread):
         self._depth_color_frame_dir: Optional[str] = None
         self._color_frame_dir: Optional[str] = None
         self._depth_raw_frame_dir: Optional[str] = None
+        self._bag_path: Optional[str] = None
         if self.cfg.save_frames:
             self._depth_color_frame_dir = os.path.join(
                 self.cfg.out_dir, "depth_color_frames"
@@ -136,6 +137,19 @@ class RecordThread(QtCore.QThread):
                 rs.stream.depth, self.cfg.width, self.cfg.height, rs.format.z16, self.cfg.fps
             )
             self._try_enable_color(rs, config)
+
+            if self.cfg.save_bag:
+                try:
+                    bag_path = os.path.join(self.cfg.out_dir, "session.bag")
+                    # 기존 파일이 남아있으면 제거
+                    if os.path.exists(bag_path):
+                        os.remove(bag_path)
+                    config.enable_record_to_file(bag_path)
+                    self._bag_path = bag_path
+                    self.sig_status.emit(f"Recording .bag → {bag_path}")
+                except Exception as exc:  # noqa: BLE001
+                    self.sig_status.emit(f".bag enable failed: {exc}")
+                    self._bag_path = None
 
             # 파이프라인 시작
             profile = self.pipeline.start(config)
@@ -213,6 +227,9 @@ class RecordThread(QtCore.QThread):
                         "fps": self.cfg.fps,
                         "color_enabled": bool(self._color_enabled),
                         "color_size": list(self._color_size) if self._color_size else None,
+                        "bag_path": os.path.abspath(self._bag_path)
+                        if self._bag_path
+                        else None,
                     },
                     f,
                     indent=2,

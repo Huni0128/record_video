@@ -29,6 +29,22 @@ artifacts:
 python -m record.analysis.npy path/to/depth_raw_frames.npy --out save/npy_analysis_out
 ```
 
+## Cropping recorded sessions
+
+Launch the GUI (`python -m record.gui.app`) and switch to the **Crop Frames** tab
+to generate cropped datasets. You can either:
+
+- Select previously saved outputs (`depth_raw_frames.npy` with optional color
+  videos/images), choose the frame **start / end / step**, and export just that
+  range of depth/color frames, or
+- Load a RealSense `.bag` file directly and slice a specific frame range into
+  per-frame depth/NPY artifacts.
+
+Cropped artifacts are written to timestamped folders under
+`save/crop_out/`, including aggregated `depth_raw_frames.npy`, per-frame
+`.npy` files and any cropped image sequences. A `crop_info.json` file contains
+the summary of each operation.
+
 ## Quick matplotlib preview
 
 ```bash

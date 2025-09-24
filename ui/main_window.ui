@@ -29,7 +29,7 @@
       </item>
       <item row="0" column="3">
        <widget class="QLineEdit" name="editOutDir">
-        <property name="placeholderText"><string>save/farm_record</string></property>
+        <property name="placeholderText"><string>save</string></property>
        </widget>
       </item>
       <item row="0" column="4">
@@ -66,6 +66,12 @@
       <item row="2" column="2">
        <widget class="QCheckBox" name="chkSaveVideos">
         <property name="text"><string>Save MP4</string></property>
+        <property name="checked"><bool>false</bool></property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QCheckBox" name="chkSaveBag">
+        <property name="text"><string>Save .bag</string></property>
         <property name="checked"><bool>false</bool></property>
        </widget>
       </item>

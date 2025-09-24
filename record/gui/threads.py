@@ -28,13 +28,12 @@ class FuncThread(QtCore.QThread):
     def run(self) -> None:  # noqa: D401 - inherited documentation suffices
         try:
             result = self.func(*self.args, **self.kwargs)
+            func_name = getattr(self.func, "__name__", str(self.func))
             if result is None:
-                self.sig_error.emit("analyze_npy returned None (no summary).")
+                self.sig_error.emit(f"{func_name} returned None (no summary).")
                 return
             if not isinstance(result, dict):
-                msg = (
-                    f"analyze_npy returned {type(result).__name__}, expected dict."
-                )
+                msg = f"{func_name} returned {type(result).__name__}, expected dict."
                 self.sig_error.emit(msg)
                 return
             self.sig_done.emit(result)

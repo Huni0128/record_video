@@ -8,7 +8,7 @@ from datetime import datetime
 __all__ = ["ensure_out_dir", "timestamped_subdir"]
 
 
-DEFAULT_BASE_DIR = "save/farm_record"
+DEFAULT_BASE_DIR = "save"
 
 
 def ensure_out_dir(base: str) -> str:
