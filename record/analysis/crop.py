@@ -298,21 +298,11 @@ def crop_saved_outputs(
 
     depth_raw_dir = os.path.join(out_dir, "depth_raw_frames")
     os.makedirs(depth_raw_dir, exist_ok=True)
-    depth_out_path = os.path.join(out_dir, "depth_raw_frames.npy")
-    cropped_depth = np.lib.format.open_memmap(  # type: ignore[attr-defined]
-        depth_out_path,
-        mode="w+",
-        dtype=depth.dtype,
-        shape=(len(indices), height, width),
-    )
 
     for out_idx, src_idx in enumerate(indices):
         frame = depth[src_idx]
-        cropped_depth[out_idx] = frame
         np.save(os.path.join(depth_raw_dir, f"frame_{out_idx:06d}.npy"), frame)
 
-    cropped_depth.flush()
-    del cropped_depth
     del depth
 
     color_dir: Optional[str] = None
@@ -331,34 +321,6 @@ def crop_saved_outputs(
             depth_color_source, depth_color_dir, indices
         )
 
-    src_meta_path = os.path.join(os.path.dirname(depth_path), "device_stream_info.json")
-    meta: Dict[str, Any]
-    if os.path.isfile(src_meta_path):
-        try:
-            with open(src_meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-        except Exception:
-            meta = {}
-    else:
-        meta = {}
-
-    if not isinstance(meta, dict):
-        meta = {}
-
-    meta["frames"] = len(indices)
-    meta["frame_selection"] = {
-        "source_frames": total_frames,
-        "frame_start": frame_start,
-        "frame_end": frame_end,
-        "frame_step": frame_step,
-        "actual_frame_end": actual_end,
-        "selected_indices": list(map(int, indices)),
-        "depth_source": depth_path,
-    }
-
-    meta_path = os.path.join(out_dir, "device_stream_info.json")
-    _write_json(meta_path, meta)
-
     summary: Dict[str, Any] = {
         "type": "crop_saved",
         "out_dir": os.path.abspath(out_dir),
@@ -370,7 +332,6 @@ def crop_saved_outputs(
         "frames": len(indices),
         "source_total_frames": total_frames,
         "depth_dtype": info.get("dtype"),
-        "depth_npy": depth_out_path,
         "depth_raw_dir": depth_raw_dir,
         "color_source": os.path.abspath(color_source) if color_source else None,
         "color_frames": int(color_saved),
@@ -381,7 +342,6 @@ def crop_saved_outputs(
         "depth_color_frames": int(depth_color_saved),
         "depth_color_dir": depth_color_dir,
         "source_indices": list(map(int, indices)),
-        "meta_path": meta_path,
     }
 
     _write_json(os.path.join(out_dir, "crop_info.json"), summary)
@@ -425,7 +385,7 @@ def crop_bag_frames(
     depth_color_saved = 0
     duration_s: Optional[float] = None
 
-    align: Optional[Any] = None  # type: ignore[name-defined]
+    align: Optional[Any] = None
     color_profile = None
     depth_profile = None
 
@@ -499,6 +459,7 @@ def crop_bag_frames(
             depth_raw = np.asanyarray(depth_frame.get_data())
             depth_frames.append(depth_raw.copy())
             out_idx = len(depth_frames) - 1
+
             np.save(os.path.join(depth_raw_dir, f"frame_{out_idx:06d}.npy"), depth_raw)
 
             depth_color = np.asanyarray(colorizer.colorize(depth_frame).get_data())
@@ -528,43 +489,7 @@ def crop_bag_frames(
     if not depth_frames:
         raise RuntimeError("선택된 범위에 해당하는 프레임이 없습니다.")
 
-    depth_array = np.stack(depth_frames, axis=0)
-    depth_npy_path = os.path.join(out_dir, "depth_raw_frames.npy")
-    np.save(depth_npy_path, depth_array)
-
     actual_end = selected_indices[-1] + 1
-
-    intrinsics = {
-        "depth": stream_intrinsics(depth_profile),
-        "color": stream_intrinsics(color_profile) if color_profile is not None else None,
-    }
-    extrinsics = {
-        "color_to_depth": extrinsics_between(color_profile, depth_profile)
-        if color_profile is not None
-        else None,
-    }
-
-    meta = {
-        "source": {"type": "bag", "path": bag_path},
-        "depth_scale_m_per_unit": float(depth_scale),
-        "resolution": [int(depth_array.shape[2]), int(depth_array.shape[1])],
-        "fps": depth_fps,
-        "frames": int(depth_array.shape[0]),
-        "duration_s": duration_s,
-        "color_enabled": bool(color_profile),
-        "intrinsics": intrinsics,
-        "extrinsics": extrinsics,
-        "frame_selection": {
-            "frame_start": frame_start,
-            "frame_end": frame_end,
-            "frame_step": frame_step,
-            "actual_frame_end": actual_end,
-            "selected_indices": list(map(int, selected_indices)),
-        },
-    }
-
-    meta_path = os.path.join(out_dir, "device_stream_info.json")
-    _write_json(meta_path, meta)
 
     summary: Dict[str, Any] = {
         "type": "crop_bag",
@@ -574,8 +499,7 @@ def crop_bag_frames(
         "frame_end": frame_end,
         "frame_step": frame_step,
         "actual_frame_end": actual_end,
-        "frames": int(depth_array.shape[0]),
-        "depth_npy": depth_npy_path,
+        "frames": int(len(depth_frames)),
         "depth_raw_dir": depth_raw_dir,
         "depth_color_dir": depth_color_dir,
         "depth_color_frames": depth_color_saved,
@@ -585,7 +509,6 @@ def crop_bag_frames(
         "duration_s": duration_s,
         "fps": depth_fps,
         "source_indices": list(map(int, selected_indices)),
-        "meta_path": meta_path,
     }
 
     _write_json(os.path.join(out_dir, "crop_info.json"), summary)
