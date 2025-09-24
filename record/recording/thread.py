@@ -23,9 +23,8 @@ import cv2
 import numpy as np
 from PyQt5 import QtCore
 
-from .config import RecordConfig
-from .helpers import fourcc_mp4v
-from .rs_utils import (
+from ..core import RecordConfig, fourcc_mp4v
+from ..realsense import (
     _import_rs,
     extrinsics_between,
     sensor_options_to_dict,

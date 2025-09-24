@@ -9,9 +9,9 @@ GUI와 CLI에서 모두 사용할 수 있는 NPY(depth only) 분석 모듈.
 - 픽셀 CSV는 용량이 매우 클 수 있습니다. 필요한 경우에만 사용하세요.
 
 예시
-    python -m farm_record.analyze_npy \
+    python -m record.analysis.npy \
         path/to/depth_raw_frames.npy \
-        --out runs/npy_analysis_out
+        --out save/npy_analysis_out
 
 Docstring 스타일: Google Style
 """
@@ -21,29 +21,17 @@ import argparse
 import csv
 import json
 import os
-from datetime import datetime
 from typing import Any, Dict
 
 import numpy as np
+
+from ..core.paths import timestamped_subdir
 
 __all__ = ["analyze_npy"]  # 외부 임포트 보장
 
 
 # ----------------------------- 내부 유틸 ------------------------------ #
-def _ensure_timestamped_dir(base: str) -> str:
-    """타임스탬프 하위 폴더를 생성하여 경로를 반환합니다.
-
-    Args:
-        base: 출력 베이스 폴더 경로.
-
-    Returns:
-        생성된 타임스탬프 하위 폴더의 절대 경로.
-    """
-    base = (base or "").strip() or "runs/npy_analysis_out"
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = os.path.join(base, ts)
-    os.makedirs(out_dir, exist_ok=True)
-    return out_dir
+DEFAULT_ANALYSIS_BASE = "save/npy_analysis_out"
 
 
 def _find_scale_from_json(npy_path: str, default: float = 0.001) -> float:
@@ -72,7 +60,7 @@ def _find_scale_from_json(npy_path: str, default: float = 0.001) -> float:
 # ----------------------------- 공개 API ------------------------------ #
 def analyze_npy(
     npy_path: str,
-    out_base_dir: str = "runs/npy_analysis_out",
+    out_base_dir: str = DEFAULT_ANALYSIS_BASE,
     make_plots: bool = False,
 ) -> Dict[str, Any]:
     """NPY(depth_raw_frames.npy) 파일을 분석합니다.
@@ -102,7 +90,7 @@ def analyze_npy(
     if not os.path.isfile(npy_path):
         raise FileNotFoundError(f"NPY not found: {npy_path}")
 
-    out_dir = _ensure_timestamped_dir(out_base_dir)
+    out_dir = timestamped_subdir(out_base_dir or DEFAULT_ANALYSIS_BASE)
 
     depth = np.load(npy_path, mmap_mode="r")  # (N, H, W) uint16
     if depth.ndim != 3:
@@ -192,7 +180,7 @@ def _cli() -> None:
     )
     parser.add_argument(
         "--out",
-        default="runs/npy_analysis_out",
+        default=DEFAULT_ANALYSIS_BASE,
         help="출력 베이스 폴더",
     )
     parser.add_argument(

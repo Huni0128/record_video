@@ -1,74 +1,25 @@
 # -*- coding: utf-8 -*-
-"""
-메인 윈도우 로직과 분석 실행 스레드를 포함한 PyQt5 GUI 모듈.
-
-- 녹화(Record) 시작/종료
-- 미리보기(Depth/Color) 갱신
-- 저장 세션 탐색 및 NPY 분석 실행/결과 표시
-
-Docstring 스타일: Google Style
-"""
+"""메인 윈도우 로직과 분석 실행 스레드를 포함한 PyQt5 GUI 모듈."""
 from __future__ import annotations
 
 import os
-import sys
 import subprocess
-from typing import Any, Callable, Dict, Optional
+import sys
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets, uic
 
-from .config import RecordConfig
-from .helpers import ensure_out_dir, qimage_from_cv
-from .record_thread import RecordThread
-from .analyze_npy import analyze_npy as run_analyze_npy
-from .npy_view_widget import NpyViewerWidget
+from ..analysis import DEFAULT_ANALYSIS_BASE, analyze_npy as run_analyze_npy
+from ..core import DEFAULT_BASE_DIR, RecordConfig, ensure_out_dir
+from ..recording import RecordThread
+from .image import qimage_from_cv
+from .threads import FuncThread
+from .viewer import NpyViewerWidget
 
 
-__all__ = ["MainWindow", "FuncThread"]
-
-
-class FuncThread(QtCore.QThread):
-    """임의의 함수 실행용 QThread 래퍼.
-
-    analyze_npy 등 블로킹 작업을 백그라운드에서 실행하고
-    완료/오류 시그널을 발생시킵니다.
-
-    Signals:
-        sig_done (object): 함수 반환값(일반적으로 dict) 전달.
-        sig_error (str): 오류 메시지 전달.
-    """
-
-    sig_done = QtCore.pyqtSignal(object)
-    sig_error = QtCore.pyqtSignal(str)
-
-    def __init__(
-        self,
-        func: Callable[..., Any],
-        *args: Any,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__()
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-
-    def run(self) -> None:
-        try:
-            result = self.func(*self.args, **self.kwargs)
-            if result is None:
-                self.sig_error.emit("analyze_npy returned None (no summary).")
-                return
-            if not isinstance(result, dict):
-                msg = (
-                    f"analyze_npy returned {type(result).__name__}, "
-                    "expected dict."
-                )
-                self.sig_error.emit(msg)
-                return
-            self.sig_done.emit(result)
-        except Exception as exc:  # noqa: BLE001
-            self.sig_error.emit(str(exc))
+__all__ = ["MainWindow"]
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -77,10 +28,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
 
-        ui_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "ui", "main_window.ui")
-        )
-        uic.loadUi(ui_path, self)
+        ui_path = Path(__file__).resolve().parents[2] / "ui" / "main_window.ui"
+        uic.loadUi(str(ui_path), self)
 
         # ---- Record 버튼/라벨 초기화 ----
         if hasattr(self, "btnStart"):
@@ -374,7 +323,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _fill_latest_session_paths(self) -> None:
         """가장 최근 세션 폴더를 찾아 NPY 경로 채우기 및 뷰어 로드."""
-        base = os.path.join("save", "farm_record")
+        base = DEFAULT_BASE_DIR
         if not os.path.isdir(base):
             QtWidgets.QMessageBox.information(
                 self, "Info", f"세션 폴더가 없습니다: {base}"
@@ -448,7 +397,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._disable_analyze_ui(True)
 
         self._npy_thread = FuncThread(
-            run_analyze_npy, npy_path, "save/npy_analysis_out", make_plots
+            run_analyze_npy, npy_path, DEFAULT_ANALYSIS_BASE, make_plots
         )
         self._npy_thread.sig_done.connect(self._on_npy_done)
         self._npy_thread.sig_error.connect(self._on_analyze_error)

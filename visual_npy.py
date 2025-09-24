@@ -1,12 +1,50 @@
-import numpy as np
+"""Quick matplotlib preview for ``depth_raw_frames.npy`` files."""
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
 import matplotlib.pyplot as plt
-
-# 이미지 데이터를 NumPy 배열로 읽어옵니다.
-image_data = np.load(r'C:\Users\user\Desktop\record_video\save\farm_record\20250924_102620\depth_image_raw_20250912_023416.npy')
+import numpy as np
 
 
-# 이미지를 시각화합니다.
-plt.imshow(image_data, cmap='gray')  # cmap을 원하는 색상 맵으로 변경할 수 있습니다.
-plt.title('Image')
-plt.axis('off')  # 축을 비활성화하여 이미지에 불필요한 눈금을 표시하지 않습니다.
-plt.show()
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("npy_path", type=Path, help="Path to a depth .npy file")
+    parser.add_argument(
+        "--frame",
+        type=int,
+        default=0,
+        help="Frame index to visualize when the array is 3-D (default: 0)",
+    )
+    parser.add_argument(
+        "--cmap",
+        default="gray",
+        help="Matplotlib colour map (default: gray)",
+    )
+    return parser.parse_args()
+
+
+def load_frame(array: np.ndarray, idx: int) -> np.ndarray:
+    """Return a 2-D frame regardless of the array dimensionality."""
+    if array.ndim == 2:
+        return array
+    if array.ndim == 3:
+        idx = max(0, min(idx, array.shape[0] - 1))
+        return array[idx]
+    raise ValueError(f"Unsupported array shape: {array.shape}")
+
+
+def main() -> None:
+    args = parse_args()
+    array = np.load(args.npy_path)
+    frame = load_frame(array, args.frame)
+
+    plt.imshow(frame, cmap=args.cmap)
+    plt.title(f"{args.npy_path.name} (frame {args.frame})")
+    plt.axis("off")
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
